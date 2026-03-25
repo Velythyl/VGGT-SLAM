@@ -16,7 +16,7 @@ for scene in "${scenes[@]}"; do
         --skip_dense_log \
         --log_path "${scene}.txt" \
         --max_loops 1 \
-        --lc_thres 0.8 \
+        --lc_thres 0.80 \
         --submap_size 8
 done
 
