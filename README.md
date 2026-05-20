@@ -147,6 +147,7 @@ To visualize the maps as they being constructed, inside the bash scripts add `--
 * September 2025: VGGT-SLAM 1.0 Accepted to Neurips 2025
 * November 2025: VGGT-SLAM 1.0 Featured in MIT News [article](https://news.mit.edu/2025/teaching-robots-to-map-large-environments-1105)
 * January 2026: VGGT-SLAM 2.0 is released
+* May 2026: VGGT-SLAM 2.0 Accepted to RSS 2026
 
 ## Todo
 
@@ -166,7 +167,7 @@ If our code is helpful, please cite our papers as follows:
 
 ```
 @article{maggio2025vggt-slam,
-  title={VGGT-SLAM: Dense RGB SLAM Optimized on the SL (4) Manifold},
+  title={{VGGT-SLAM}: Dense RGB SLAM Optimized on the SL (4) Manifold},
   author={Maggio, Dominic and Lim, Hyungtae and Carlone, Luca},
   journal={Advances in Neural Information Processing Systems},
   volume={39},
@@ -176,9 +177,9 @@ If our code is helpful, please cite our papers as follows:
 
 ```
 @article{maggio2025vggt-slam2,
-  title={VGGT-SLAM 2.0: Real-time Dense Feed-forward Scene Reconstruction},
+  title={{VGGT-SLAM 2.0}: Real-time Dense Feed-forward Scene Reconstruction},
   author={Maggio, Dominic and Carlone, Luca},
-  journal={arXiv preprint arXiv:2601.19887},
+  journal={Robotics: Science and Systems},
   year={2026}
 }
 ```
