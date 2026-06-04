@@ -148,12 +148,13 @@ To visualize the maps as they being constructed, inside the bash scripts add `--
 * November 2025: VGGT-SLAM 1.0 Featured in MIT News [article](https://news.mit.edu/2025/teaching-robots-to-map-large-environments-1105)
 * January 2026: VGGT-SLAM 2.0 is released
 * May 2026: VGGT-SLAM 2.0 Accepted to RSS 2026
+* May 2026: FOUND-IT is released [link](https://arxiv.org/abs/2605.25371) which builds a 3D scene graph on top of VGGT-SLAM 2.0
 
 ## Todo
 
 - [ ] Release real-time code. This code enables plugging in a Real Sense Camera and incrementally constructing a map 
 as the camera explored a scene. This has been tested on a Jetson Thor onboard a robot.
-- [ ] Add optional code to sparsify the visualized map as visualizing large point cloud maps can slow down the code.
+- [ ] Add updated Viser code to solve the issue of large numbers of points and frames slowing down the visualizer.
 
 ## Acknowledgement
 

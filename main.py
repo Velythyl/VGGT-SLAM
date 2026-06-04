@@ -158,7 +158,6 @@ def main():
                 print("Exiting.")
                 return
             
-            start_time = time.time()
             text_emb = utils.compute_text_embeddings(clip_model, clip_tokenizer, query)
             overall_best_score, overall_best_submap_id, overall_best_frame_index = solver.map.retrieve_best_semantic_frame(text_emb)
 
@@ -176,7 +175,6 @@ def main():
                 print(f"Found {masks.shape[0]} masks from SAM3 for the prompt '{query}'")
                 print("Scores:", scores.cpu().numpy())
 
-            print("Time taken for query:", time.time() - start_time)
 
             masked_img = utils.overlay_masks(best_img, masks)
             masked_img.show()
@@ -199,12 +197,9 @@ def main():
     if args.log_results:
         solver.map.write_poses_to_file(args.log_path, solver.graph, kitti_format=False)
 
-        # Log the full point cloud as one file, used for visualization.
-        # solver.map.write_points_to_file(solver.graph, args.log_path.replace(".txt", "_points.pcd"))
-
         if not args.skip_dense_log:
-            # Log the dense point cloud for each submap.
-            solver.map.save_framewise_pointclouds(solver.graph, args.log_path.replace(".txt", "_logs"))
+            # Log the full point cloud as one file
+            solver.map.write_points_to_file(solver.graph, args.log_path.replace(".txt", "_points.pcd"))
 
 
 if __name__ == "__main__":

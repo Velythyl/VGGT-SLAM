@@ -369,7 +369,7 @@ class Solver:
         
         if predictions_lc is not None:
             image_match_ratio = predictions_lc["image_match_ratio"]
-            if image_match_ratio < -0.95:
+            if image_match_ratio < 0.95:
                 print(colored("Loop closure image match ratio too low, skipping loop closure", "red"))
                 predictions_lc = None # We set to None to ignore the loop closure
                 predictions["detected_loops"] = []
