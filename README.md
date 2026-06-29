@@ -33,6 +33,7 @@
 * [💻 Installation](#installation-of-vGGT-sLAM)
 * [🚀 Quick Start](#quick-start)
 * [📊 Running Evaluations](#running-evaluations)
+* [⚡ Running Online](#Running-Online)
 * [📄 News and Updates](#News-and-Updates)
 * [📄 Paper Citation](#citation)
 
@@ -117,7 +118,8 @@ Note while vertical cell phone videos can work, to avoid images being cropped it
 See main.py or run `--help` from main.py to view all parameters. 
 
 For visualizing larger datasets, displaying all 3D points in Viser can either slow or crash 
-the visualizer. One way to mitigate this is to sparsify the point cloud that is sent to Viser which can be done with `--vis_voxel_size 0.005`. Increasing the number will decrease the number of displayed points. Note that this does not affect the number of points stored or used internally in VGGT-SLAM.
+the visualizer. One way to mitigate this is to sparsify the point cloud that is sent to Viser which can be done with `--vis_voxel_size 0.005`. Increasing the number will decrease the number of displayed points. Note that this does not affect the number of points stored or used internally in VGGT-SLAM. 
+Also, by default, camera images are not shown in Viser (only frustums). The images can be added with `--vis_imgs`, but this will slow down the visualizer.
 
 ---
 
@@ -141,6 +143,10 @@ python evals/process_logs_tum.py --submap_size 32
 
 To visualize the maps as they being constructed, inside the bash scripts add `--vis_map`. This will update the viser map each time the submap is updated. 
 
+## Running Online
+To run online, plug in a RealSense camera and run `python main_realtime.py --vis_map`. Support for open-set object detection can be enabled with `--run_os` and objects can be queried in Viser. Note that it may be desirable to reduce submap size when running the realtime code 
+just to have more frequent map updates. For example, by adding `--submap_size 8`. 
+
 ## News and Updates
 * May 2025: VGGT-SLAM 1.0 is released
 * August 2025: SL(4) optimization is integrated into the official GTSAM repo
@@ -149,12 +155,8 @@ To visualize the maps as they being constructed, inside the bash scripts add `--
 * January 2026: VGGT-SLAM 2.0 is released
 * May 2026: VGGT-SLAM 2.0 Accepted to RSS 2026
 * May 2026: FOUND-IT is released [link](https://arxiv.org/abs/2605.25371) which builds a 3D scene graph on top of VGGT-SLAM 2.0
+* June 2026: Real-time code added along with upgraded features to the visualizer
 
-## Todo
-
-- [ ] Release real-time code. This code enables plugging in a Real Sense Camera and incrementally constructing a map 
-as the camera explored a scene. This has been tested on a Jetson Thor onboard a robot.
-- [ ] Add updated Viser code to solve the issue of large numbers of points and frames slowing down the visualizer.
 
 ## Acknowledgement
 
