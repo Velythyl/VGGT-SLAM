@@ -19,6 +19,7 @@ from vggt.models.vggt import VGGT
 parser = argparse.ArgumentParser(description="VGGT-SLAM demo")
 parser.add_argument("--image_folder", type=str, default="examples/kitchen/images/", help="Path to folder containing images")
 parser.add_argument("--vis_map", action="store_true", help="Visualize point cloud in viser as it is being build, otherwise only show the final map")
+parser.add_argument("--vis_imgs", action="store_true", help="Show camera images in the viser frustums. By default only the frustums are shown (faster visualization)")
 parser.add_argument("--vis_voxel_size", type=float, default=None, help="Voxel size for downsampling the point cloud in the viewer (e.g. 0.05 for 5 cm). Default: no downsampling")
 parser.add_argument("--run_os", action="store_true", help="Enable open-set semantic search with Perception Encoder CLIP and SAM3")
 parser.add_argument("--vis_flow", action="store_true", help="Visualize optical flow from RAFT for keyframe selection")
@@ -46,7 +47,8 @@ def main():
     solver = Solver(
         init_conf_threshold=args.conf_threshold,
         lc_thres=args.lc_thres,
-        vis_voxel_size=args.vis_voxel_size
+        vis_voxel_size=args.vis_voxel_size,
+        vis_imgs=args.vis_imgs
     )
 
     print("Initializing and loading VGGT model...")
@@ -147,6 +149,12 @@ def main():
 
 
     if args.run_os:
+        # Register the viser object-query panel so the user can search for
+        # objects in the viewer in addition to the terminal prompt below.
+        import threading
+        data_lock = threading.Lock()
+        solver.viewer.add_object_query_gui(solver, clip_model, clip_tokenizer, processor, data_lock)
+
         while True:
             # Prompt user for text input
             query = input("\nEnter text query or q to quit: ").strip()

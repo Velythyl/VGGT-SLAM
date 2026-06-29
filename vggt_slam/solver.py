@@ -38,10 +38,12 @@ class Solver:
     def __init__(self,
         init_conf_threshold: float,  # represents percentage (e.g., 50 means filter lowest 50%)
         lc_thres: float = 0.80,
-        vis_voxel_size: float = None):
-        
+        vis_voxel_size: float = None,
+        vis_imgs: bool = False):
+
         self.init_conf_threshold = init_conf_threshold
         self.vis_voxel_size = vis_voxel_size
+        self.vis_imgs = vis_imgs
 
         self.viewer = Viewer()
 
@@ -85,7 +87,7 @@ class Solver:
     def set_submap_poses(self, submap):
         # Add the camera poses to the visualization.
         extrinsics = submap.get_all_poses_world(self.graph)
-        images = submap.get_all_frames()
+        images = submap.get_all_frames() if self.vis_imgs else None
         self.viewer.visualize_frames(extrinsics, images, submap.get_id())
 
     def update_all_submap_vis(self):

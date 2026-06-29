@@ -34,10 +34,10 @@ class Viewer:
         """
         Add camera frames and frustums to the scene for a specific submap.
         extrinsics: (S, 3, 4)
-        images_:    (S, 3, H, W)
+        images_:    (S, 3, H, W) or None to show frustums without the camera images
         """
 
-        if isinstance(images_, torch.Tensor):
+        if images_ is not None and isinstance(images_, torch.Tensor):
             images_ = images_.cpu().numpy()
 
         if submap_id not in self.submap_frames:
@@ -66,17 +66,24 @@ class Viewer:
             frame_axis.visible = self.gui_show_frames.value
             self.submap_frames[submap_id].append(frame_axis)
 
-            # Convert image and add frustum
-            img = images_[img_id]
-            img = (img.transpose(1, 2, 0) * 255).astype(np.uint8)
-            h, w = img.shape[:2]
-            fy = 1.1 * h
-            fov = 2 * np.arctan2(h / 2, fy)
+            # Convert image and add frustum. When images are not provided, show
+            # just the frustum (no image) with a default FOV/aspect to keep the
+            # visualization fast.
+            fov = np.radians(90)  # default FOV if no images provided
+            img = None
+            aspect = 1.0
+            if images_ is not None:
+                img = images_[img_id]
+                img = (img.transpose(1, 2, 0) * 255).astype(np.uint8)
+                h, w = img.shape[:2]
+                fy = 1.1 * h
+                fov = 2 * np.arctan2(h / 2, fy)
+                aspect = w / h
 
             frustum = self.server.scene.add_camera_frustum(
                 frustum_name,
                 fov=fov,
-                aspect=w / h,
+                aspect=aspect,
                 scale=0.05,
                 image=img,
                 line_width=3.0,
@@ -165,6 +172,70 @@ class Viewer:
             line_width=line_width,
             visible=True
         )
+
+    def add_object_query_gui(self, solver, clip_model, clip_tokenizer, processor, data_lock) -> None:
+        """Add an object query panel to the viser sidebar.
+
+        Mirrors the terminal open-set query flow: retrieve the best-matching
+        keyframe via CLIP, run SAM3 to segment the queried object, then draw an
+        oriented bounding box per detected instance in the 3-D scene. Requires
+        --run_os (clip_model / processor loaded) and a non-empty map.
+        """
+        import torch
+        from torchvision.transforms.functional import to_pil_image
+        import vggt_slam.slam_utils as utils
+
+        with self.server.gui.add_folder("Object Query"):
+            gui_query = self.server.gui.add_text("Query", initial_value="")
+            gui_status = self.server.gui.add_markdown("*Enter a query and press Search.*")
+            btn_search = self.server.gui.add_button("Search", color="green")
+
+        @btn_search.on_click
+        def _on_search(_) -> None:
+            query = gui_query.value.strip()
+            if not query:
+                gui_status.content = "*Enter a query first.*"
+                return
+            if solver.map.get_num_submaps() == 0:
+                gui_status.content = "*No map data yet. Capture some frames first.*"
+                return
+            gui_status.content = f"*Searching for '{query}'…*"
+            try:
+                with data_lock:
+                    text_emb = utils.compute_text_embeddings(clip_model, clip_tokenizer, query)
+                    best_score, best_submap_id, best_frame_index = \
+                        solver.map.retrieve_best_semantic_frame(text_emb)
+                    found_submap = solver.map.get_submap(best_submap_id)
+                    best_img = found_submap.get_frame_at_index(best_frame_index)
+
+                    with torch.no_grad():
+                        pil_img = to_pil_image(best_img)
+                        inference_state = processor.set_image(pil_img)
+                        output = processor.set_text_prompt(state=inference_state, prompt=query)
+                        masks = output["masks"]
+
+                    n = masks.shape[0]
+                    for i in range(n):
+                        mask = masks[i].cpu().numpy()
+                        obb_center, obb_extent, obb_rotation = utils.compute_obb_from_points(
+                            found_submap.get_points_in_mask(best_frame_index, mask, solver.graph)
+                        )
+                        self.visualize_obb(
+                            center=obb_center,
+                            extent=obb_extent,
+                            rotation=obb_rotation,
+                            color=(255, 0, 0),
+                            line_width=8.0,
+                        )
+
+                if n == 0:
+                    gui_status.content = f"*No instances found for '{query}'.*"
+                else:
+                    gui_status.content = f"**Found {n} instance(s)** for *'{query}'*"
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                gui_status.content = f"*Error: {e}*"
 
     def run_walkthrough(self, fps: float = 20.0):
             """
