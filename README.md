@@ -41,6 +41,43 @@
 
 ## Installation of VGGT-SLAM
 
+### CUDA container (recommended)
+
+The published image keeps VGGT-SLAM and its Python 3.11 dependencies isolated
+from the host. It is built for `linux/amd64` with CUDA 12.1 and is published to
+GHCR on pushes to `main` or `master`, version tags, and manual dispatches.
+
+Build it locally with Podman:
+
+```
+podman build --arch amd64 -t vggt-slam:local .
+```
+
+Run it with the NVIDIA Container Toolkit. Mount the image sequence read-only,
+an output directory read/write, and a Hugging Face cache so the VGGT checkpoint
+is downloaded once rather than baked into the image:
+
+```
+mkdir -p /path/to/output "$HOME/.cache/huggingface"
+podman run --rm --device nvidia.com/gpu=all \
+  -v /path/to/images:/work/images:ro,Z \
+  -v /path/to/output:/work/output:Z \
+  -v "$HOME/.cache/huggingface:/root/.cache/huggingface:Z" \
+  -w /work/output \
+  ghcr.io/velythyl/vggt_slam:latest \
+  --image_folder /work/images --max_loops 1 --log_results --log_path poses.txt
+```
+
+The image entrypoint is `python /opt/vggt-slam/main.py`; therefore the final
+command above is passed directly to VGGT-SLAM. To run an arbitrary Python
+probe, override the entrypoint:
+
+```
+podman run --rm --device nvidia.com/gpu=all --entrypoint python \
+  ghcr.io/velythyl/vggt_slam:latest \
+  -c "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
+```
+
 Clone VGGT-SLAM:
 
 ```
@@ -186,4 +223,3 @@ If our code is helpful, please cite our papers as follows:
   year={2026}
 }
 ```
-
