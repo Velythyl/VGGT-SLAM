@@ -78,6 +78,10 @@ podman run --rm --device nvidia.com/gpu=all --entrypoint python \
   -c "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
 ```
 
+The default image supports mapping. It intentionally does not include the
+optional `--run_os` Perception Encoder/SAM3 stack: its NumPy 2 requirement
+conflicts with the NumPy 1.x requirement of the VGGT mapping model.
+
 Clone VGGT-SLAM:
 
 ```

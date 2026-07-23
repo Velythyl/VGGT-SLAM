@@ -25,24 +25,25 @@ RUN apt-get update \
 WORKDIR ${VGGT_SLAM_ROOT}
 
 COPY requirements.txt setup.py ./
+# The mapping model requires NumPy 1.x. Perception Encoder's NumPy 2 pin is
+# intentionally excluded below because it is only needed by --run_os.
 RUN uv python install 3.11 \
     && uv venv --seed --python 3.11 ${VIRTUAL_ENV} \
-    && uv pip install --python ${VIRTUAL_ENV}/bin/python -r requirements.txt
+    && printf 'numpy<2\n' > /tmp/mapping-constraints.txt \
+    && uv pip install --python ${VIRTUAL_ENV}/bin/python \
+        --constraints /tmp/mapping-constraints.txt \
+        -r requirements.txt
 
 COPY . ${VGGT_SLAM_ROOT}
 
-# Open-set detection imports these projects lazily, but including them keeps the
-# container feature-equivalent to setup.sh while leaving model checkpoints to
-# Hugging Face's runtime cache.
+# Perception Encoder and SAM3 are deliberately omitted: they are only imported
+# for --run_os and currently require NumPy 2, which conflicts with VGGT's
+# required NumPy 1.x. The mapping image remains a valid, focused runtime.
 RUN git clone --depth 1 https://github.com/Dominic101/salad.git third_party/salad \
     && git clone --depth 1 https://github.com/MIT-SPARK/VGGT_SPARK.git third_party/vggt \
-    && git clone --depth 1 https://github.com/facebookresearch/perception_models.git third_party/perception_models \
-    && git clone --depth 1 https://github.com/facebookresearch/sam3.git third_party/sam3 \
     && uv pip install --python ${VIRTUAL_ENV}/bin/python \
         -e third_party/salad \
         -e third_party/vggt \
-        -e third_party/perception_models \
-        -e third_party/sam3 \
         -e . \
     && python -c "import gtsam, torch, vggt, vggt_slam; assert torch.version.cuda == '12.1'"
 
