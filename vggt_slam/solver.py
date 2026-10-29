@@ -39,7 +39,8 @@ class Solver:
         init_conf_threshold: float,  # represents percentage (e.g., 50 means filter lowest 50%)
         lc_thres: float = 0.80,
         vis_voxel_size: float = None,
-        vis_imgs: bool = False):
+        vis_imgs: bool = False,
+        odometry=None):
 
         self.init_conf_threshold = init_conf_threshold
         self.vis_voxel_size = vis_voxel_size
@@ -55,6 +56,11 @@ class Solver:
         self.current_working_submap = None
 
         self.lc_thres = lc_thres
+
+        # Optional metric odometry (vggt_slam/odometry.py); None = upstream behaviour.
+        self.odometry = odometry
+        self.odometry_factors = 0
+        self.rejected_loops = 0
 
         self.temp_count = 0
         self.vggt_timer = Accumulator()
@@ -142,7 +148,13 @@ class Solver:
             P_temp = np.linalg.inv(prior_submap.proj_mats[-1]) @ current_submap.proj_mats[0]
             t1 = (P_temp[0:3,0:3] @ current_submap.get_frame_pointcloud(frame_id_curr).reshape(-1, 3)[good_mask].T).T
             t2 = prior_submap.get_frame_pointcloud(frame_id_prev).reshape(-1, 3)[good_mask]
-            scale_factor_est_output = estimate_scale_pairwise(t1, t2)
+            if current_submap.is_metric() and prior_submap.is_metric():
+                # Both submaps were put in metres by the odometry: there is
+                # no relative scale left to estimate, and the pairwise
+                # estimate is exactly what falls apart on low-overlap frames.
+                scale_factor_est_output = (1.0, "odometry")
+            else:
+                scale_factor_est_output = estimate_scale_pairwise(t1, t2)
             print(colored("scale factor", 'green'), scale_factor_est_output)
             scale_factor = scale_factor_est_output[0]
             H_scale = np.diag((scale_factor, scale_factor, scale_factor, 1.0))
@@ -168,6 +180,11 @@ class Solver:
 
         else:
             assert (submap_id_curr == 0 and frame_id_curr == 0), "First added node must be submap 0 frame 0"
+            if self.odometry is not None and current_submap.is_metric():
+                # Gauge: publish the map in the odometry frame.
+                anchor = self.odometry.pose(current_submap.get_frame_ids()[0])
+                if anchor is not None:
+                    H_w_submap = anchor
             self.graph.add_homography(submap_id_curr + frame_id_curr, H_w_submap)
             self.graph.add_prior_factor(submap_id_curr + frame_id_curr, H_w_submap)
             if DEBUG:
@@ -195,6 +212,22 @@ class Solver:
             if DEBUG:
                 print("Adding homography: \n", submap_id_curr + index, current_node / current_node[-1,-1])
                 print("Adding between factor: \n", submap_id_curr + index - 1, submap_id_curr + index, H_inner)
+
+        # Odometry relative-pose factors along the submap's frames. Inside one
+        # submap the nodes differ by VGGT's (now metric) SE(3) motion, so the
+        # odometry's camera motion is directly comparable to H_inner.
+        # Not for a loop-closure submap: its two frames are far apart in time,
+        # and odometry drift between them would fight the closure.
+        if self.odometry is not None and current_submap.is_metric() and not current_submap.get_lc_status():
+            frame_ids = current_submap.get_frame_ids()
+            for index in range(1, len(world_to_cam)):
+                relative = self.odometry.relative(frame_ids[index - 1], frame_ids[index])
+                if relative is None:
+                    continue
+                self.graph.add_between_factor(
+                    submap_id_curr + index - 1, submap_id_curr + index, relative, self.odometry.noise
+                )
+                self.odometry_factors += 1
 
     def add_points(self, pred_dict):
         """
@@ -244,6 +277,8 @@ class Solver:
         if not first_edge:
             frame_id_prev = self.map.get_latest_submap(ignore_loop_closure_submaps=True).get_last_non_loop_frame_index()
 
+        world_to_cam, world_points = self.apply_odometry_scale(self.current_working_submap, world_to_cam, world_points)
+
         # Add attributes to submap and add submap to map.
         self.current_working_submap.add_all_poses(world_to_cam)
         self.current_working_submap.add_all_points(world_points, colors, conf, self.init_conf_threshold, K_4x4)
@@ -277,6 +312,7 @@ class Solver:
             lc_submap.set_frame_ids(pred_dict["frames_lc_names"])
             lc_submap.set_last_non_loop_frame_index(1)
 
+            world_to_cam_lc, world_points_lc = self.apply_odometry_scale(lc_submap, world_to_cam_lc, world_points_lc)
             lc_submap.add_all_poses(world_to_cam_lc)
             lc_colors = (np.transpose(pred_dict["frames_lc"].cpu().numpy(), (0, 2, 3, 1)) * 255).astype(np.uint8)
             lc_submap.add_all_points(world_points_lc, lc_colors, conf_lc, self.init_conf_threshold, K_4x4_lc)
@@ -287,6 +323,23 @@ class Solver:
 
             self.add_edge(lc_submap_num, 0, loop.query_submap_id, loop.query_submap_frame, is_loop_closure=False)
             self.add_edge(loop.detected_submap_id, loop.detected_submap_frame, lc_submap_num, 1, is_loop_closure=True)
+
+    def apply_odometry_scale(self, submap, world_to_cam, world_points):
+        """Rescale a submap's VGGT reconstruction into metres, when the odometry can tell.
+
+        World-to-camera translations and camera-frame points scale together,
+        a similarity of the whole submap. Marks the submap metric or not.
+        """
+        if self.odometry is None:
+            return world_to_cam, world_points
+        scale = self.odometry.submap_scale(submap.get_id(), submap.get_frame_ids(), world_to_cam)
+        if scale is None:
+            submap.set_metric(False)
+            return world_to_cam, world_points
+        world_to_cam = world_to_cam.copy()
+        world_to_cam[:, :3, 3] *= scale
+        submap.set_metric(True)
+        return world_to_cam, world_points * scale
 
     def sample_pixel_coordinates(self, H, W, n):
         # Sample n random row indices (y-coordinates)
@@ -341,6 +394,17 @@ class Solver:
         predictions_lc = None
         with self.loop_closure_timer:
             detected_loops = self.image_retrieval.find_loop_closures(self.map, new_submap, max_loop_closures=max_loops, max_similarity_thres=self.lc_thres)
+            if self.odometry is not None and detected_loops:
+                kept = []
+                for loop in detected_loops:
+                    query = new_submap.get_frame_ids()[loop.query_submap_frame]
+                    match = self.map.get_submap(loop.detected_submap_id).get_frame_ids()[loop.detected_submap_frame]
+                    if self.odometry.loop_plausible(query, match):
+                        kept.append(loop)
+                    else:
+                        self.rejected_loops += 1
+                        print(colored(f"Odometry rejects loop closure {query} <-> {match}: too far apart", "red"))
+                detected_loops = kept
         loop_closure_frame_names = []
         if len(detected_loops) > 0:
             print(colored("detected_loops", "yellow"), detected_loops)

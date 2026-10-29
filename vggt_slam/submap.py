@@ -26,6 +26,13 @@ class Submap:
         self.is_lc_submap = False
         self.img_names = []
         self.semantic_vectors = []
+        self.metric = False  # rescaled into metres by odometry (vggt_slam/odometry.py)
+
+    def set_metric(self, metric):
+        self.metric = bool(metric)
+
+    def is_metric(self):
+        return self.metric
     
     def set_lc_status(self, is_lc_submap):
         self.is_lc_submap = is_lc_submap

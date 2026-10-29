@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import vggt_slam.slam_utils as utils
 from vggt_slam.solver import Solver
 from vggt_slam.submap import Submap
+from vggt_slam.odometry import Odometry, frame_number
 
 from vggt.models.vggt import VGGT
 
@@ -32,6 +33,12 @@ parser.add_argument("--max_loops", type=int, default=1, help="ONLY DEFAULT OF 1 
 parser.add_argument("--min_disparity", type=float, default=50, help="Minimum disparity to generate a new keyframe")
 parser.add_argument("--conf_threshold", type=float, default=25.0, help="Initial percentage of low-confidence points to filter out")
 parser.add_argument("--lc_thres", type=float, default=0.95, help="Threshold for image retrieval. Range: [0, 1.0]. Higher = more loop closures")
+# Odometry fusion (see vggt_slam/odometry.py). Every option below is inert without --odometry.
+parser.add_argument("--odometry", type=str, default=None, help="Metric camera-to-odometry poses, one row per image: '<frame number> tx ty tz qx qy qz qw'. Enables odometry keyframing, metric submap scale, odometry factors and loop gating")
+parser.add_argument("--odom_kf_dist", type=float, default=0.5, help="With --odometry: also make a keyframe after the camera moves this many metres")
+parser.add_argument("--odom_kf_angle", type=float, default=15.0, help="With --odometry: also make a keyframe after the camera turns this many degrees")
+parser.add_argument("--odom_sigma", type=float, default=0.05, help="With --odometry: sigma of the odometry relative-pose factors (the VGGT factors use 0.05)")
+parser.add_argument("--odom_lc_max_dist", type=float, default=3.0, help="With --odometry: reject loop closures whose frames the odometry places further apart than this (metres)")
 
 
 def main():
@@ -44,11 +51,19 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
+    odometry = None
+    if args.odometry:
+        odometry = Odometry.load(
+            args.odometry, kf_dist=args.odom_kf_dist, kf_angle_deg=args.odom_kf_angle,
+            sigma=args.odom_sigma, lc_max_dist=args.odom_lc_max_dist,
+        )
+
     solver = Solver(
         init_conf_threshold=args.conf_threshold,
         lc_thres=args.lc_thres,
         vis_voxel_size=args.vis_voxel_size,
-        vis_imgs=args.vis_imgs
+        vis_imgs=args.vis_imgs,
+        odometry=odometry,
     )
 
     print("Initializing and loading VGGT model...")
@@ -101,6 +116,16 @@ def main():
             with keyframe_time:
                 img = cv2.imread(image_name)
                 enough_disparity = solver.flow_tracker.compute_disparity(img, args.min_disparity, args.vis_flow)
+                if odometry is not None:
+                    frame = frame_number(image_name)
+                    if not enough_disparity and odometry.moved_since_keyframe(frame):
+                        # The flow test missed real motion (e.g. driving
+                        # straight at a far vanishing point): restart its
+                        # reference here too, as its own keyframe would.
+                        solver.flow_tracker.initialize_keyframe(img)
+                        enough_disparity = True
+                    if enough_disparity:
+                        odometry.mark_keyframe(frame)
                 if enough_disparity:
                     image_names_subset.append(image_name)
                     image_count += 1
@@ -146,6 +171,10 @@ def main():
         
     print("Total number of submaps in map", solver.map.get_num_submaps())
     print("Total number of loop closures in map", solver.graph.get_num_loops())
+    if odometry is not None:
+        metric = sum(1 for _, scale, _ in odometry.scales if scale is not None)
+        print(f"Odometry: {metric} of {len(odometry.scales)} submaps metric-scaled by odometry; "
+              f"{solver.odometry_factors} odometry factors; {solver.rejected_loops} loop closures rejected by odometry")
 
 
     if args.run_os:
