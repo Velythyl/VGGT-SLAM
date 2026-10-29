@@ -184,15 +184,31 @@ What the odometry does, and why (`vggt_slam/odometry.py`, `vggt_slam/solver.py`)
 | Where | Without odometry | With `--odometry` |
 |---|---|---|
 | Keyframes (`main.py`) | mean optical-flow displacement > `--min_disparity` | the same, **or** the camera moved `--odom_kf_dist` m (0.5) / turned `--odom_kf_angle` deg (15) since the last keyframe. Driving straight at a far vanishing point gives tiny flow, and on a real robot recording that left 10-30 s (up to 13 m) between keyframes, so VGGT had to relate frames with no overlap. |
-| Submap scale (`Solver.apply_odometry_scale`) | arbitrary per submap; chained by `estimate_scale_pairwise` on the overlap frame | each submap is rescaled (poses and points together) so its camera displacements match the odometry's: median ratio over frame pairs the odometry moved >= 5 cm (and >= 1/4 of the longest pair). A submap the odometry cannot scale (parked robot, < 3 pairs) and loop-closure submaps keep the pairwise estimate. |
+| Submap scale (`Solver.apply_metric_scale`) | arbitrary per submap; chained by `estimate_scale_pairwise` on the overlap frame | each submap is rescaled (poses and points together) into metres. With `--metric_depth_folder` (measured depth per image, `vggt_slam/metric_depth.py`): median of measured over predicted depth on confident pixels -- this also makes loop-closure submaps metric. Otherwise, or without enough depth: the odometry's displacement scale, the median ratio over frame pairs the odometry moved >= 5 cm (and >= 1/4 of the longest pair). Both are printed with their ratio. A submap neither can scale keeps the pairwise estimate. |
 | Overlap edge (`Solver.add_edge`) | `H_scale` from the pairwise estimate | identity when both submaps are metric |
-| Factors | VGGT inner/overlap/loop `BetweenFactorSL4`s | plus one odometry `BetweenFactorSL4` per consecutive frame pair inside a metric, non-loop submap: `T_ci_cj = T_odom_ci^-1 T_odom_cj`, sigma `--odom_sigma` (0.05, the same as VGGT's own factors). Inside one submap the nodes differ by VGGT's SE(3) motion, so the two are directly comparable. |
+| Inner-submap motion | VGGT's relative pose between consecutive frames | `--odom_inner fuse` (default): VGGT's rotation with the odometry's translation, as the one measurement for that frame pair. `--odom_inner factor`: VGGT's motion plus a separate odometry `BetweenFactorSL4` (sigma `--odom_sigma`). Fuse is the default because two disagreeing rigid measurements in an SL(4) graph get reconciled through the homographies' scale/projective components (graph error 170-300 vs 0 on the recording below), and because the sources are complementary: wheel odometry under-reports spin turns by 8-20%, VGGT's rotation does not. Inside one submap the nodes differ by SE(3), so either is directly comparable. |
 | Gauge | first node at identity | first node at its odometry pose: the map is published in the odometry frame, in metres |
 | Loop closures | retrieval + image-match check | also rejected when the odometry puts the two frames more than `--odom_lc_max_dist` m (3) apart |
 
 The output files are unchanged in format. The run prints a summary line
 (`Odometry: N of M submaps metric-scaled by odometry; K odometry factors; L
 loop closures rejected by odometry`).
+
+Measured on a 262 s Mila xArm6 recording (41.5 m of driving, two in-place
+turns), against odometry composed with the fitted camera mount: path length
+over the driving part 41.9 m vs 42.3 m (upstream: 64.5 m), rigid RMS 0.22 m
+(upstream: 9.9 m), median rotation error 1.8 deg (upstream: 38 deg), no jumps.
+
+A note on the dense cloud, odometry or not: VGGT's depth confidence comes out
+of a bfloat16 model, where `1 + exp(x)` rounds to exactly 1.0 for most
+pixels of a texture-poor scene. `Submap.add_all_points` then sets the
+threshold to `percentile(conf, 25) + 1e-6` = 1.000001, and the strict `>`
+drops every tied pixel: on the recording above only 11% of pixels survive
+(0% in some submaps) instead of 75%, mostly far, confident structure. Those
+that survive agree with measured depth (3.4% median error; the dropped ones:
+12.5%), so the cloud is consistent with the poses but missing most near
+surfaces -- which reads as a cloud "metres away" from its trajectory. Left
+unchanged here.
 
 Not done: odometry factors *across* submaps. Two submaps meet at a shared
 frame through an SL(4) edge that also carries VGGT's intrinsics change
