@@ -164,6 +164,42 @@ Also, by default, camera images are not shown in Viser (only frustums). The imag
 
 ---
 
+## Odometry fusion (`odometry` branch)
+
+`main.py --odometry <file>` fuses a metric odometry (e.g. a mobile base's
+wheel odometry composed with a fixed base-to-camera mount). Without the flag
+nothing changes. The file has one row per image:
+
+```
+<frame number> tx ty tz qx qy qz qw
+```
+
+`frame number` is the number in the image's file name (`frame_000123.png` ->
+123, as `Submap.set_frame_ids` reads it) and the pose is the **camera** (OpenCV
+optical frame) in the odometry frame, `T_odom_camera`. Frames without a row are
+fine; they just get no odometry constraint. Image: `ghcr.io/velythyl/vggt_slam:odometry`.
+
+What the odometry does, and why (`vggt_slam/odometry.py`, `vggt_slam/solver.py`):
+
+| Where | Without odometry | With `--odometry` |
+|---|---|---|
+| Keyframes (`main.py`) | mean optical-flow displacement > `--min_disparity` | the same, **or** the camera moved `--odom_kf_dist` m (0.5) / turned `--odom_kf_angle` deg (15) since the last keyframe. Driving straight at a far vanishing point gives tiny flow, and on a real robot recording that left 10-30 s (up to 13 m) between keyframes, so VGGT had to relate frames with no overlap. |
+| Submap scale (`Solver.apply_odometry_scale`) | arbitrary per submap; chained by `estimate_scale_pairwise` on the overlap frame | each submap is rescaled (poses and points together) so its camera displacements match the odometry's: median ratio over frame pairs the odometry moved >= 5 cm (and >= 1/4 of the longest pair). A submap the odometry cannot scale (parked robot, < 3 pairs) and loop-closure submaps keep the pairwise estimate. |
+| Overlap edge (`Solver.add_edge`) | `H_scale` from the pairwise estimate | identity when both submaps are metric |
+| Factors | VGGT inner/overlap/loop `BetweenFactorSL4`s | plus one odometry `BetweenFactorSL4` per consecutive frame pair inside a metric, non-loop submap: `T_ci_cj = T_odom_ci^-1 T_odom_cj`, sigma `--odom_sigma` (0.05, the same as VGGT's own factors). Inside one submap the nodes differ by VGGT's SE(3) motion, so the two are directly comparable. |
+| Gauge | first node at identity | first node at its odometry pose: the map is published in the odometry frame, in metres |
+| Loop closures | retrieval + image-match check | also rejected when the odometry puts the two frames more than `--odom_lc_max_dist` m (3) apart |
+
+The output files are unchanged in format. The run prints a summary line
+(`Odometry: N of M submaps metric-scaled by odometry; K odometry factors; L
+loop closures rejected by odometry`).
+
+Not done: odometry factors *across* submaps. Two submaps meet at a shared
+frame through an SL(4) edge that also carries VGGT's intrinsics change
+(`inv(K_prev) @ K_curr`), so an SE(3) odometry factor between nodes of
+different submaps would fight that correction; the shared frame plus the
+within-submap factors already chain the odometry through.
+
 ## Running Evaluations
 
 To automatically run evaluation on TUM and 7-Scenes datasets, first install the datasets using the provided download instructions from [MASt3R-SLAM](https://github.com/rmurai0610/MASt3R-SLAM?tab=readme-ov-file#examples). Set the download location of MASt3R-SLAM by setting *abs_dir* in the bash scripts 
