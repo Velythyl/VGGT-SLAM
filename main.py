@@ -14,6 +14,7 @@ import vggt_slam.slam_utils as utils
 from vggt_slam.solver import Solver
 from vggt_slam.submap import Submap
 from vggt_slam.odometry import Odometry, frame_number
+from vggt_slam.metric_depth import MetricDepth
 
 from vggt.models.vggt import VGGT
 
@@ -38,6 +39,9 @@ parser.add_argument("--odometry", type=str, default=None, help="Metric camera-to
 parser.add_argument("--odom_kf_dist", type=float, default=0.5, help="With --odometry: also make a keyframe after the camera moves this many metres")
 parser.add_argument("--odom_kf_angle", type=float, default=15.0, help="With --odometry: also make a keyframe after the camera turns this many degrees")
 parser.add_argument("--odom_sigma", type=float, default=0.05, help="With --odometry: sigma of the odometry relative-pose factors (the VGGT factors use 0.05)")
+parser.add_argument("--odom_inner", choices=("fuse", "factor"), default="fuse", help="With --odometry: 'fuse' replaces each VGGT inner-submap motion by VGGT's rotation with the odometry's translation (one SE(3) measurement per frame pair); 'factor' keeps VGGT's motion and adds a separate odometry factor")
+parser.add_argument("--metric_depth_folder", type=str, default=None, help="Measured depth images named like the input images; each submap is scaled to metres by measured over predicted depth (see vggt_slam/metric_depth.py)")
+parser.add_argument("--metric_depth_scale", type=float, default=1000.0, help="Depth image units per metre for --metric_depth_folder")
 parser.add_argument("--odom_lc_max_dist", type=float, default=3.0, help="With --odometry: reject loop closures whose frames the odometry places further apart than this (metres)")
 
 
@@ -55,7 +59,7 @@ def main():
     if args.odometry:
         odometry = Odometry.load(
             args.odometry, kf_dist=args.odom_kf_dist, kf_angle_deg=args.odom_kf_angle,
-            sigma=args.odom_sigma, lc_max_dist=args.odom_lc_max_dist,
+            sigma=args.odom_sigma, lc_max_dist=args.odom_lc_max_dist, inner=args.odom_inner,
         )
 
     solver = Solver(
@@ -64,6 +68,7 @@ def main():
         vis_voxel_size=args.vis_voxel_size,
         vis_imgs=args.vis_imgs,
         odometry=odometry,
+        metric_depth=MetricDepth(args.metric_depth_folder, args.metric_depth_scale) if args.metric_depth_folder else None,
     )
 
     print("Initializing and loading VGGT model...")

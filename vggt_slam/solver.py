@@ -40,7 +40,8 @@ class Solver:
         lc_thres: float = 0.80,
         vis_voxel_size: float = None,
         vis_imgs: bool = False,
-        odometry=None):
+        odometry=None,
+        metric_depth=None):
 
         self.init_conf_threshold = init_conf_threshold
         self.vis_voxel_size = vis_voxel_size
@@ -59,6 +60,8 @@ class Solver:
 
         # Optional metric odometry (vggt_slam/odometry.py); None = upstream behaviour.
         self.odometry = odometry
+        # Optional measured depth (vggt_slam/metric_depth.py) for each submap's metric scale.
+        self.metric_depth = metric_depth
         self.odometry_factors = 0
         self.rejected_loops = 0
 
@@ -201,6 +204,13 @@ class Solver:
                 continue
 
             H_inner = world_to_cam[index-1] @ np.linalg.inv(pose) # TODO Dominic, no need to take the inverse twice, just use cam_to_world
+            if self.odometry is not None and self.odometry.inner == "fuse" and current_submap.is_metric() \
+                    and not current_submap.get_lc_status():
+                ids = current_submap.get_frame_ids()
+                fused = self.odometry.fuse_motion(ids[index - 1], ids[index], H_inner)
+                if fused is not None:
+                    H_inner = fused
+                    self.odometry_factors += 1
             current_node = self.graph.get_homography(submap_id_curr + index - 1) @ H_inner
 
             # Add node to graph.
@@ -218,7 +228,8 @@ class Solver:
         # odometry's camera motion is directly comparable to H_inner.
         # Not for a loop-closure submap: its two frames are far apart in time,
         # and odometry drift between them would fight the closure.
-        if self.odometry is not None and current_submap.is_metric() and not current_submap.get_lc_status():
+        if self.odometry is not None and self.odometry.inner == "factor" and current_submap.is_metric() \
+                and not current_submap.get_lc_status():
             frame_ids = current_submap.get_frame_ids()
             for index in range(1, len(world_to_cam)):
                 relative = self.odometry.relative(frame_ids[index - 1], frame_ids[index])
@@ -277,7 +288,8 @@ class Solver:
         if not first_edge:
             frame_id_prev = self.map.get_latest_submap(ignore_loop_closure_submaps=True).get_last_non_loop_frame_index()
 
-        world_to_cam, world_points = self.apply_odometry_scale(self.current_working_submap, world_to_cam, world_points)
+        world_to_cam, world_points = self.apply_metric_scale(
+            self.current_working_submap, world_to_cam, world_points, conf, self.current_working_submap.img_names)
 
         # Add attributes to submap and add submap to map.
         self.current_working_submap.add_all_poses(world_to_cam)
@@ -312,7 +324,8 @@ class Solver:
             lc_submap.set_frame_ids(pred_dict["frames_lc_names"])
             lc_submap.set_last_non_loop_frame_index(1)
 
-            world_to_cam_lc, world_points_lc = self.apply_odometry_scale(lc_submap, world_to_cam_lc, world_points_lc)
+            world_to_cam_lc, world_points_lc = self.apply_metric_scale(
+                lc_submap, world_to_cam_lc, world_points_lc, conf_lc, pred_dict["frames_lc_names"])
             lc_submap.add_all_poses(world_to_cam_lc)
             lc_colors = (np.transpose(pred_dict["frames_lc"].cpu().numpy(), (0, 2, 3, 1)) * 255).astype(np.uint8)
             lc_submap.add_all_points(world_points_lc, lc_colors, conf_lc, self.init_conf_threshold, K_4x4_lc)
@@ -324,15 +337,28 @@ class Solver:
             self.add_edge(lc_submap_num, 0, loop.query_submap_id, loop.query_submap_frame, is_loop_closure=False)
             self.add_edge(loop.detected_submap_id, loop.detected_submap_frame, lc_submap_num, 1, is_loop_closure=True)
 
-    def apply_odometry_scale(self, submap, world_to_cam, world_points):
-        """Rescale a submap's VGGT reconstruction into metres, when the odometry can tell.
+    def apply_metric_scale(self, submap, world_to_cam, world_points, conf, img_names):
+        """Rescale a submap's VGGT reconstruction into metres, when depth or odometry can tell.
 
-        World-to-camera translations and camera-frame points scale together,
-        a similarity of the whole submap. Marks the submap metric or not.
+        Measured depth (--metric_depth_folder) is preferred: it scales the
+        points directly. The odometry's displacement-based scale is the
+        fallback, and is computed (and printed) either way so a disagreement
+        -- VGGT under-estimating its own motion -- is visible. World-to-camera
+        translations and camera-frame points scale together, a similarity of
+        the whole submap. Marks the submap metric or not.
         """
-        if self.odometry is None:
+        if self.odometry is None and self.metric_depth is None:
             return world_to_cam, world_points
-        scale = self.odometry.submap_scale(submap.get_id(), submap.get_frame_ids(), world_to_cam)
+        scale = None
+        if self.odometry is not None:
+            scale = self.odometry.submap_scale(submap.get_id(), submap.get_frame_ids(), world_to_cam)
+        if self.metric_depth is not None:
+            threshold = np.percentile(conf, self.init_conf_threshold) + 1e-6
+            depth_scale = self.metric_depth.submap_scale(submap.get_id(), img_names, world_points, conf, threshold)
+            if depth_scale is not None:
+                if scale is not None:
+                    print(f"Submap {submap.get_id()}: odometry/depth scale ratio {scale / depth_scale:.3f}")
+                scale = depth_scale
         if scale is None:
             submap.set_metric(False)
             return world_to_cam, world_points

@@ -60,6 +60,7 @@ class Odometry:
         sigma: float = 0.05,
         lc_max_dist: float = 3.0,
         min_scale_motion: float = 0.05,
+        inner: str = "fuse",
     ) -> None:
         if not poses:
             raise ValueError("The odometry file holds no poses.")
@@ -67,6 +68,9 @@ class Odometry:
         self.kf_dist = float(kf_dist)
         self.kf_angle = np.radians(float(kf_angle_deg))
         self.lc_max_dist = float(lc_max_dist)
+        if inner not in ("fuse", "factor"):
+            raise ValueError(f"inner must be 'fuse' or 'factor', got {inner!r}")
+        self.inner = inner
         self.min_scale_motion = float(min_scale_motion)
         self.noise = noiseModel.Diagonal.Sigmas(float(sigma) * np.ones(15, dtype=float))
         self._last_keyframe: np.ndarray | None = None
@@ -98,6 +102,29 @@ class Odometry:
         if a is None or b is None:
             return None
         return np.linalg.inv(a) @ b
+
+    def fuse_motion(self, first: float, second: float, vggt_motion: np.ndarray) -> np.ndarray | None:
+        """VGGT's rotation with the odometry's translation for one frame pair, or ``None``.
+
+        The two sources are complementary on a wheeled robot: wheel odometry
+        measures distance well but under-reports spin turns (wheel slip),
+        while VGGT gets rotation right but can badly underestimate
+        translation (a camera that sees part of the robot sees something
+        that never moves). Fusing them into *one* SE(3) measurement, instead
+        of two disagreeing BetweenFactorSL4s, matters in an SL(4) graph: the
+        optimizer reconciles disagreeing rigid measurements through the
+        homographies' scale and projective components, which leave the
+        decomposed camera poses looking right while scaling each frame's
+        points.
+        """
+
+        odometry = self.relative(first, second)
+        if odometry is None:
+            return None
+        fused = np.eye(4)
+        fused[:3, :3] = vggt_motion[:3, :3]
+        fused[:3, 3] = odometry[:3, 3]
+        return fused
 
     # ---------------------------------------------------------- keyframing
 

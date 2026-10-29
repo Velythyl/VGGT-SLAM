@@ -11,6 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/vggt-slam/.venv/bin:/root/.local/bin:$PATH
 
+# libusb: open3d wheels newer than the July 2026 :latest build link it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -19,6 +20,7 @@ RUN apt-get update \
         libegl1 \
         libglib2.0-0 \
         libgl1 \
+        libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && curl --fail --location --silent --show-error https://astral.sh/uv/${UV_VERSION}/install.sh | sh
 
